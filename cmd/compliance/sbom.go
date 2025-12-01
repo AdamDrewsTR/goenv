@@ -11,8 +11,10 @@ import (
 	"github.com/go-nv/goenv/internal/cmdutil"
 	"github.com/go-nv/goenv/internal/config"
 	"github.com/go-nv/goenv/internal/errors"
+	"github.com/go-nv/goenv/internal/manager"
 	"github.com/go-nv/goenv/internal/platform"
 	"github.com/go-nv/goenv/internal/resolver"
+	"github.com/go-nv/goenv/internal/sbom"
 	"github.com/go-nv/goenv/internal/utils"
 	"github.com/spf13/cobra"
 )
@@ -73,14 +75,17 @@ Supported tools:
 }
 
 var (
-	sbomTool        string
-	sbomFormat      string
-	sbomOutput      string
-	sbomDir         string
-	sbomImage       string
-	sbomModulesOnly bool
-	sbomOffline     bool
-	sbomToolArgs    string
+	sbomTool          string
+	sbomFormat        string
+	sbomOutput        string
+	sbomDir           string
+	sbomImage         string
+	sbomModulesOnly   bool
+	sbomOffline       bool
+	sbomToolArgs      string
+	sbomDeterministic bool
+	sbomEmbedDigests  bool
+	sbomEnhance       bool
 )
 
 func init() {
@@ -92,9 +97,134 @@ func init() {
 	sbomProjectCmd.Flags().BoolVar(&sbomModulesOnly, "modules-only", false, "Only scan Go modules (cyclonedx-gomod)")
 	sbomProjectCmd.Flags().BoolVar(&sbomOffline, "offline", false, "Offline mode - avoid network access")
 	sbomProjectCmd.Flags().StringVar(&sbomToolArgs, "tool-args", "", "Additional arguments to pass to the tool")
+	sbomProjectCmd.Flags().BoolVar(&sbomEnhance, "enhance", true, "Add Go-aware metadata to SBOM (default true)")
+	sbomProjectCmd.Flags().BoolVar(&sbomDeterministic, "deterministic", false, "Generate deterministic/reproducible SBOM")
+	sbomProjectCmd.Flags().BoolVar(&sbomEmbedDigests, "embed-digests", false, "Embed go.mod/go.sum digests for reproducibility")
 
 	sbomCmd.AddCommand(sbomProjectCmd)
+	sbomCmd.AddCommand(sbomHashCmd)
+	sbomCmd.AddCommand(sbomVerifyCmd)
 	cmdpkg.RootCmd.AddCommand(sbomCmd)
+}
+
+var sbomHashCmd = &cobra.Command{
+	Use:   "hash <sbom-file>",
+	Short: "Compute digest of an SBOM file",
+	Long: `Compute a cryptographic hash of an SBOM file for reproducibility verification.
+
+This command normalizes the SBOM (sorting components, normalizing whitespace) before
+computing the digest to ensure consistent hashing across different generation runs.
+
+The digest can be used to verify that two SBOMs have identical semantic content,
+even if they were generated at different times or with different metadata timestamps.
+
+Examples:
+  # Compute hash of an SBOM
+  goenv sbom hash sbom.json
+
+  # Compute hash with specific algorithm
+  goenv sbom hash sbom.json --algorithm=sha512`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSBOMHash,
+}
+
+var sbomVerifyCmd = &cobra.Command{
+	Use:   "verify-reproducible <sbom1> <sbom2>",
+	Short: "Verify two SBOMs have identical reproducible content",
+	Long: `Compare two SBOM files to verify they have identical semantic content.
+
+This command normalizes both SBOMs (removing timestamps, sorting components) and
+compares their content digests to verify reproducibility. Exit code 0 indicates
+the SBOMs are identical, non-zero indicates differences.
+
+This is useful for:
+- Verifying deterministic SBOM generation in CI/CD
+- Detecting unexpected changes in dependencies
+- Validating reproducible builds
+
+Examples:
+  # Compare two SBOMs
+  goenv sbom verify-reproducible sbom1.json sbom2.json
+
+  # Verify with detailed diff output
+  goenv sbom verify-reproducible sbom1.json sbom2.json --diff`,
+	Args: cobra.ExactArgs(2),
+	RunE: runSBOMVerify,
+}
+
+var (
+	hashAlgorithm string
+	verifyDiff    bool
+)
+
+func init() {
+	sbomHashCmd.Flags().StringVar(&hashAlgorithm, "algorithm", "sha256", "Hash algorithm (sha256, sha512)")
+	sbomVerifyCmd.Flags().BoolVar(&verifyDiff, "diff", false, "Show detailed differences if SBOMs don't match")
+}
+
+func runSBOMHash(cmd *cobra.Command, args []string) error {
+	sbomPath := args[0]
+
+	// Verify file exists
+	if !utils.FileExists(sbomPath) {
+		return fmt.Errorf("SBOM file not found: %s", sbomPath)
+	}
+
+	// Compute hash using the enhancer's deterministic logic
+	ctx := cmdutil.GetContexts(cmd)
+	cfg := ctx.Config
+
+	hash, err := sbom.ComputeSBOMDigest(sbomPath, hashAlgorithm)
+	if err != nil {
+		return errors.FailedTo("compute SBOM digest", err)
+	}
+
+	// Output hash in format: <algorithm>:<hex-digest>
+	if cfg.Debug {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s:%s  %s\n", hashAlgorithm, hash, sbomPath)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s:%s\n", hashAlgorithm, hash)
+	}
+
+	return nil
+}
+
+func runSBOMVerify(cmd *cobra.Command, args []string) error {
+	sbom1Path := args[0]
+	sbom2Path := args[1]
+
+	// Verify both files exist
+	if !utils.FileExists(sbom1Path) {
+		return fmt.Errorf("SBOM file not found: %s", sbom1Path)
+	}
+	if !utils.FileExists(sbom2Path) {
+		return fmt.Errorf("SBOM file not found: %s", sbom2Path)
+	}
+
+	// Compare SBOMs
+	ctx := cmdutil.GetContexts(cmd)
+
+	cfg := ctx.Config
+	match, diff, err := sbom.VerifyReproducible(sbom1Path, sbom2Path)
+	if err != nil {
+		return errors.FailedTo("verify reproducibility", err)
+	}
+
+	if match {
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ SBOMs are reproducibly identical\n")
+		if cfg.Debug {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Debug: %s == %s\n", sbom1Path, sbom2Path)
+		}
+		return nil
+	}
+
+	// SBOMs don't match
+	fmt.Fprintf(cmd.ErrOrStderr(), "✗ SBOMs differ\n")
+	if verifyDiff {
+		fmt.Fprintf(cmd.OutOrStdout(), "\nDifferences:\n%s\n", diff)
+	}
+
+	return fmt.Errorf("SBOMs are not reproducibly identical")
 }
 
 func runSBOMProject(cmd *cobra.Command, args []string) error {
@@ -170,10 +300,35 @@ func runSBOMProject(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(cmd.ErrOrStderr(), "goenv: SBOM written to %s\n", sbomOutput)
 
+	// Enhance SBOM with Go-aware metadata if enabled
+	if sbomEnhance && (sbomTool == "cyclonedx-gomod" || sbomFormat == "cyclonedx-json") {
+		if err := enhanceSBOM(cfg, mgr, cmd); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "goenv: Warning: Failed to enhance SBOM: %v\n", err)
+			// Don't fail - enhancement is optional
+		} else {
+			fmt.Fprintf(cmd.ErrOrStderr(), "goenv: SBOM enhanced with Go-aware metadata\n")
+		}
+	}
+
 	return nil
 }
 
-// resolveSBOMTool finds the tool binary using version-aware resolution
+// enhanceSBOM adds Go-specific metadata to the generated SBOM
+func enhanceSBOM(cfg *config.Config, mgr *manager.Manager, cmd *cobra.Command) error {
+	// Import the enhancer package
+	enhancer := sbom.NewEnhancer(cfg, mgr)
+
+	opts := sbom.EnhanceOptions{
+		ProjectDir:    sbomDir,
+		Deterministic: sbomDeterministic,
+		OfflineMode:   sbomOffline,
+		EmbedDigests:  sbomEmbedDigests || sbomDeterministic, // Always embed if deterministic
+	}
+
+	return enhancer.EnhanceCycloneDX(sbomOutput, opts)
+}
+
+// resolveSBOMTool finds the tool binary in goenv-managed paths
 func resolveSBOMTool(cfg *config.Config, env *utils.GoenvEnvironment, tool, version, versionSource string) (string, error) {
 	// Use resolver to respect local vs global context
 	r := resolver.New(cfg, env)
