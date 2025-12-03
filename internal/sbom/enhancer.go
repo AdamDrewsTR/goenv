@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"sort"
@@ -335,15 +337,150 @@ func (e *Enhancer) injectMetadata(sbom map[string]interface{}, metadata *GoenvMe
 func (e *Enhancer) enhanceComponents(sbom map[string]interface{}, opts EnhanceOptions) error {
 	components, ok := sbom["components"].([]interface{})
 	if !ok {
-		return nil // No components to enhance
+		components = []interface{}{}
 	}
 
-	// TODO: Add stdlib component
+	// Add stdlib component if Go source files are present
+	if stdlibComponent, err := e.createStdlibComponent(opts.ProjectDir); err == nil && stdlibComponent != nil {
+		components = append(components, stdlibComponent)
+	}
+
 	// TODO: Mark replaced components
 	// TODO: Add retracted version warnings
 
 	sbom["components"] = components
 	return nil
+}
+
+// createStdlibComponent analyzes Go source files and creates a stdlib component
+func (e *Enhancer) createStdlibComponent(projectDir string) (map[string]interface{}, error) {
+	if projectDir == "" {
+		projectDir = "."
+	}
+
+	// Discover stdlib imports from Go source files
+	stdlibImports, err := e.discoverStdlibImports(projectDir)
+	if err != nil || len(stdlibImports) == 0 {
+		return nil, err
+	}
+
+	// Get Go version for the component
+	goVersion, _, err := e.manager.GetCurrentVersion()
+	if err != nil {
+		goVersion = "unknown"
+	}
+
+	// Create stdlib component in CycloneDX format
+	component := map[string]interface{}{
+		"type":        "library",
+		"name":        "golang-stdlib",
+		"version":     goVersion,
+		"purl":        fmt.Sprintf("pkg:golang/stdlib@%s", goVersion),
+		"bom-ref":     fmt.Sprintf("pkg:golang/stdlib@%s", goVersion),
+		"description": fmt.Sprintf("Go standard library packages used by this project (%d packages)", len(stdlibImports)),
+		"properties": []map[string]interface{}{
+			{
+				"name":  "goenv:stdlib_packages",
+				"value": strings.Join(stdlibImports, ","),
+			},
+			{
+				"name":  "goenv:stdlib_count",
+				"value": fmt.Sprintf("%d", len(stdlibImports)),
+			},
+		},
+	}
+
+	return component, nil
+}
+
+// discoverStdlibImports scans Go source files for stdlib imports
+func (e *Enhancer) discoverStdlibImports(projectDir string) ([]string, error) {
+	stdlibSet := make(map[string]bool)
+
+	// Walk through all .go files
+	err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors, continue walking
+		}
+
+		// Skip vendor and hidden directories
+		if info.IsDir() {
+			name := info.Name()
+			if name == "vendor" || name == "testdata" || strings.HasPrefix(name, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Only process .go files
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+
+		// Parse the Go file
+		fset := token.NewFileSet()
+		node, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if err != nil {
+			return nil // Skip files with parse errors
+		}
+
+		// Extract imports
+		for _, imp := range node.Imports {
+			importPath := strings.Trim(imp.Path.Value, `"`)
+
+			// Check if it's a stdlib package
+			if e.isStdlibPackage(importPath) {
+				stdlibSet[importPath] = true
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert set to sorted slice
+	stdlibImports := make([]string, 0, len(stdlibSet))
+	for pkg := range stdlibSet {
+		stdlibImports = append(stdlibImports, pkg)
+	}
+	sort.Strings(stdlibImports)
+
+	return stdlibImports, nil
+}
+
+// isStdlibPackage determines if an import path is from the Go standard library
+func (e *Enhancer) isStdlibPackage(importPath string) bool {
+	// Stdlib packages don't have dots in the first path element
+	// (except for some special cases like golang.org/x/...)
+
+	// Explicitly exclude known non-stdlib patterns
+	if strings.HasPrefix(importPath, "github.com/") ||
+		strings.HasPrefix(importPath, "golang.org/x/") ||
+		strings.HasPrefix(importPath, "gopkg.in/") ||
+		strings.HasPrefix(importPath, "go.uber.org/") ||
+		strings.Contains(importPath, ".com/") ||
+		strings.Contains(importPath, ".io/") ||
+		strings.Contains(importPath, ".org/") ||
+		strings.Contains(importPath, ".net/") {
+		return false
+	}
+
+	// Internal packages are not stdlib for third-party projects
+	if strings.HasPrefix(importPath, e.config.Root) {
+		return false
+	}
+
+	// Common stdlib packages (non-exhaustive, covers major ones)
+	firstSegment := importPath
+	if idx := strings.Index(importPath, "/"); idx > 0 {
+		firstSegment = importPath[:idx]
+	}
+
+	// Stdlib packages typically don't have dots
+	return !strings.Contains(firstSegment, ".")
 }
 
 // makeDeterministic ensures reproducible output

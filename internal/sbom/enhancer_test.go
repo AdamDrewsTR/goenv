@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/go-nv/goenv/internal/config"
+	"github.com/go-nv/goenv/internal/manager"
 )
 
 func TestComputeSBOMDigest(t *testing.T) {
@@ -156,4 +160,75 @@ func TestGenerateDeterministicUUID(t *testing.T) {
 	if len(uuid1) < 32 {
 		t.Errorf("UUID too short: %s", uuid1)
 	}
+}
+
+func TestStdlibDetection(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create a simple Go file with stdlib imports
+	goFile := `package main
+
+import (
+	"fmt"
+	"os"
+	"encoding/json"
+	"github.com/external/package"
+)
+
+func main() {
+	fmt.Println("test")
+}
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "main.go"), []byte(goFile), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	// Create test SBOM
+	sbomPath := filepath.Join(tempDir, "sbom.json")
+	sbom := map[string]interface{}{
+		"bomFormat":   "CycloneDX",
+		"specVersion": "1.5",
+		"version":     1,
+		"components":  []interface{}{},
+	}
+	data, _ := json.MarshalIndent(sbom, "", "  ")
+	os.WriteFile(sbomPath, data, 0644)
+
+	// Test stdlib import discovery directly
+	enhancer := &Enhancer{
+		config:  &config.Config{Root: tempDir},
+		manager: &manager.Manager{},
+	}
+
+	stdlibImports, err := enhancer.discoverStdlibImports(tempDir)
+	if err != nil {
+		t.Fatalf("discoverStdlibImports failed: %v", err)
+	}
+
+	if len(stdlibImports) == 0 {
+		t.Fatal("Expected stdlib imports but got none")
+	}
+
+	// Check expected stdlib packages
+	expected := []string{"fmt", "os", "encoding/json"}
+	for _, exp := range expected {
+		found := false
+		for _, imp := range stdlibImports {
+			if imp == exp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected stdlib package %s not found", exp)
+		}
+	}
+
+	// Ensure external package is NOT detected as stdlib
+	for _, imp := range stdlibImports {
+		if strings.Contains(imp, "github.com") {
+			t.Errorf("External package %s incorrectly identified as stdlib", imp)
+		}
+	}
+
 }
