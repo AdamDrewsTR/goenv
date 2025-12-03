@@ -331,6 +331,11 @@ func enhanceSBOM(cfg *config.Config, mgr *manager.Manager, cmd *cobra.Command) e
 // resolveSBOMTool finds the tool binary in goenv-managed paths
 func resolveSBOMTool(cfg *config.Config, env *utils.GoenvEnvironment, tool, version, versionSource string) (string, error) {
 	// Use resolver to respect local vs global context
+	sbomTools := map[string]string{
+		"cyclonedx-gomod": "github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod",
+		"syft":            "github.com/anchore/syft/cmd/syft",
+	}
+
 	r := resolver.New(cfg, env)
 
 	if version != "unknown" && version != "" {
@@ -344,14 +349,37 @@ func resolveSBOMTool(cfg *config.Config, env *utils.GoenvEnvironment, tool, vers
 		return path, nil
 	}
 
+	goTool, ok := sbomTools[tool]
+	if !ok {
+		return "", fmt.Errorf("unsupported SBOM tool: %s", tool)
+	}
+
+	goTool = fmt.Sprintf("%s@latest", goTool)
+
+	fmt.Printf("goenv: %s not found in goenv-managed paths or system PATH. Attempting to install...\n", tool)
+
+	cmd := exec.Command("goenv", "tools", "install", goTool)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err == nil {
+		// Retry finding the tool after installation; it will be rehashed into the shims automatically
+		if toolPath, err := r.ResolveBinary(tool, version, versionSource); err == nil {
+			return toolPath, nil
+		}
+	} else {
+		return "", fmt.Errorf("goenv: Failed to install %s: %w", tool, err)
+	}
+
 	// Tool not found - provide actionable error
 	return "", fmt.Errorf(`%s not found
 
-To install for current version:
-  goenv tools install %s@latest
+To install:
+  goenv tools install %s
 
 Or install system-wide with:
-  go install <package-path>`, tool, tool)
+  go install %s`, tool, goTool, goTool)
 }
 
 // buildCycloneDXCommand builds the cyclonedx-gomod command

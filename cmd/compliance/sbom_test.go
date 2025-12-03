@@ -175,9 +175,7 @@ func TestResolveSBOMTool_NotFound(t *testing.T) {
 	_, err = resolveSBOMTool(cfg, env, "nonexistent-tool", "1.21.0", "")
 	assert.Error(t, err, "Expected error for non-existent tool")
 
-	assert.Contains(t, err.Error(), "not found", "Expected 'not found' error %v", err)
-
-	assert.Contains(t, err.Error(), "goenv tools install", "Expected installation instructions in error %v", err)
+	assert.Contains(t, err.Error(), "unsupported SBOM tool", "Expected 'unsupported SBOM tool' error %v", err)
 }
 
 func TestBuildCycloneDXCommand(t *testing.T) {
