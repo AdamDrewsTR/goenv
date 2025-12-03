@@ -52,14 +52,30 @@ type GoenvMetadata struct {
 
 // BuildContext captures build-time configuration
 type BuildContext struct {
-	Tags       []string          `json:"tags,omitempty"`
-	CgoEnabled bool              `json:"cgo_enabled"`
-	GOOS       string            `json:"goos"`
-	GOARCH     string            `json:"goarch"`
-	Compiler   string            `json:"compiler"`
-	LDFlags    string            `json:"ldflags,omitempty"`
-	GCFlags    string            `json:"gcflags,omitempty"`
-	BuildFlags map[string]string `json:"build_flags,omitempty"`
+	Tags              []string          `json:"tags,omitempty"`
+	CgoEnabled        bool              `json:"cgo_enabled"`
+	GOOS              string            `json:"goos"`
+	GOARCH            string            `json:"goarch"`
+	Compiler          string            `json:"compiler"`
+	LDFlags           string            `json:"ldflags,omitempty"`
+	GCFlags           string            `json:"gcflags,omitempty"`
+	BuildFlags        map[string]string `json:"build_flags,omitempty"`
+	ConstraintsActive []string          `json:"constraints_active,omitempty"`
+	PackagesExcluded  []string          `json:"packages_excluded,omitempty"`
+}
+
+// BuildConstraintInfo represents a build constraint found in source files
+type BuildConstraintInfo struct {
+	File       string
+	Constraint string
+	Satisfied  bool
+}
+
+// RetractedInfo represents retraction information for a module version
+type RetractedInfo struct {
+	Retracted          bool   `json:"retracted"`
+	RetractionReason   string `json:"retraction_reason,omitempty"`
+	RecommendedVersion string `json:"recommended_version,omitempty"`
 }
 
 // ModuleContext captures Go module metadata
@@ -185,6 +201,12 @@ func (e *Enhancer) gatherBuildContext(projectDir string) (*BuildContext, error) 
 	// Get ldflags/gcflags if set
 	ctx.LDFlags = os.Getenv("LDFLAGS")
 	ctx.GCFlags = os.Getenv("GCFLAGS")
+
+	// Analyze build constraints
+	if constraints, excluded, err := e.analyzeBuildConstraints(projectDir, ctx.Tags); err == nil {
+		ctx.ConstraintsActive = constraints
+		ctx.PackagesExcluded = excluded
+	}
 
 	return ctx, nil
 }
@@ -481,6 +503,317 @@ func (e *Enhancer) isStdlibPackage(importPath string) bool {
 
 	// Stdlib packages typically don't have dots
 	return !strings.Contains(firstSegment, ".")
+}
+
+// analyzeBuildConstraints scans Go source files for build constraints
+func (e *Enhancer) analyzeBuildConstraints(projectDir string, activeTags []string) ([]string, []string, error) {
+	if projectDir == "" {
+		projectDir = "."
+	}
+
+	constraintsMap := make(map[string]bool)
+	excludedPackages := []string{}
+	satisfiedConstraints := []string{}
+
+	// Build a set of active tags for fast lookup
+	tagSet := make(map[string]bool)
+	for _, tag := range activeTags {
+		tagSet[tag] = true
+	}
+
+	// Add GOOS and GOARCH as implicit tags
+	tagSet[platform.OS()] = true
+	tagSet[platform.Arch()] = true
+
+	// Walk through Go files
+	err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip vendor and hidden directories
+		if info.IsDir() {
+			name := info.Name()
+			if name == "vendor" || name == "testdata" || strings.HasPrefix(name, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Only process .go files
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+
+		// Read first few lines for build constraints
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		lines := strings.Split(string(data), "\n")
+		for i := 0; i < len(lines) && i < 10; i++ {
+			line := strings.TrimSpace(lines[i])
+
+			// Check for //go:build constraint
+			if strings.HasPrefix(line, "//go:build ") {
+				constraint := strings.TrimPrefix(line, "//go:build ")
+				constraintsMap[constraint] = true
+
+				// Simplified constraint evaluation
+				satisfied := e.evaluateConstraint(constraint, tagSet)
+				if satisfied {
+					satisfiedConstraints = append(satisfiedConstraints, constraint)
+				} else {
+					// This file would be excluded
+					pkgPath := filepath.Dir(path)
+					if relPath, err := filepath.Rel(projectDir, pkgPath); err == nil && relPath != "." {
+						excludedPackages = append(excludedPackages, relPath)
+					}
+				}
+				break
+			}
+
+			// Check for legacy // +build constraint
+			if strings.HasPrefix(line, "// +build ") {
+				constraint := strings.TrimPrefix(line, "// +build ")
+				constraintsMap[constraint] = true
+
+				satisfied := e.evaluateLegacyConstraint(constraint, tagSet)
+				if satisfied {
+					satisfiedConstraints = append(satisfiedConstraints, "// +build "+constraint)
+				} else {
+					pkgPath := filepath.Dir(path)
+					if relPath, err := filepath.Rel(projectDir, pkgPath); err == nil && relPath != "." {
+						excludedPackages = append(excludedPackages, relPath)
+					}
+				}
+				break
+			}
+
+			// Stop at package declaration or first non-comment
+			if strings.HasPrefix(line, "package ") || (line != "" && !strings.HasPrefix(line, "//")) {
+				break
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Deduplicate excluded packages
+	excludedSet := make(map[string]bool)
+	for _, pkg := range excludedPackages {
+		excludedSet[pkg] = true
+	}
+	excludedList := make([]string, 0, len(excludedSet))
+	for pkg := range excludedSet {
+		excludedList = append(excludedList, pkg)
+	}
+	sort.Strings(excludedList)
+	sort.Strings(satisfiedConstraints)
+
+	return satisfiedConstraints, excludedList, nil
+}
+
+// evaluateConstraint evaluates a //go:build constraint
+func (e *Enhancer) evaluateConstraint(constraint string, tags map[string]bool) bool {
+	// Simplified evaluation: handles AND (&&), OR (||), NOT (!)
+	// This is a basic implementation - full constraint parsing is complex
+
+	// Remove parentheses for simple evaluation
+	constraint = strings.ReplaceAll(constraint, "(", "")
+	constraint = strings.ReplaceAll(constraint, ")", "")
+
+	// Handle OR conditions
+	if strings.Contains(constraint, "||") {
+		parts := strings.Split(constraint, "||")
+		for _, part := range parts {
+			if e.evaluateConstraint(strings.TrimSpace(part), tags) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Handle AND conditions
+	if strings.Contains(constraint, "&&") {
+		parts := strings.Split(constraint, "&&")
+		for _, part := range parts {
+			if !e.evaluateConstraint(strings.TrimSpace(part), tags) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// Handle NOT
+	if strings.HasPrefix(constraint, "!") {
+		return !tags[strings.TrimPrefix(constraint, "!")]
+	}
+
+	// Simple tag check
+	return tags[constraint]
+}
+
+// evaluateLegacyConstraint evaluates a legacy // +build constraint
+func (e *Enhancer) evaluateLegacyConstraint(constraint string, tags map[string]bool) bool {
+	// Legacy format: space-separated = OR, comma-separated = AND, ! = NOT
+	// Example: "linux,!cgo darwin" means (linux AND NOT cgo) OR darwin
+
+	orGroups := strings.Fields(constraint)
+	for _, group := range orGroups {
+		andTags := strings.Split(group, ",")
+		allMatch := true
+		for _, tag := range andTags {
+			tag = strings.TrimSpace(tag)
+			if strings.HasPrefix(tag, "!") {
+				if tags[strings.TrimPrefix(tag, "!")] {
+					allMatch = false
+					break
+				}
+			} else {
+				if !tags[tag] {
+					allMatch = false
+					break
+				}
+			}
+		}
+		if allMatch {
+			return true
+		}
+	}
+	return false
+}
+
+// markRetractedVersions adds retraction information to components
+func (e *Enhancer) markRetractedVersions(components []interface{}, projectDir string) error {
+	if projectDir == "" {
+		projectDir = "."
+	}
+
+	// Parse go.mod to find dependencies and check for retractions
+	modPath := filepath.Join(projectDir, "go.mod")
+	if !utils.FileExists(modPath) {
+		return nil
+	}
+
+	data, err := os.ReadFile(modPath)
+	if err != nil {
+		return err
+	}
+
+	// Build a map of module -> version from require statements
+	requires := make(map[string]string)
+	lines := strings.Split(string(data), "\n")
+	inRequire := false
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		if strings.HasPrefix(line, "require (") {
+			inRequire = true
+			continue
+		}
+		if inRequire && line == ")" {
+			inRequire = false
+			continue
+		}
+
+		// Parse require statement
+		if strings.HasPrefix(line, "require ") || (inRequire && line != "" && !strings.HasPrefix(line, "//")) {
+			line = strings.TrimPrefix(line, "require ")
+			line = strings.TrimSpace(line)
+
+			// Skip comments
+			if strings.HasPrefix(line, "//") {
+				continue
+			}
+
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				module := parts[0]
+				version := parts[1]
+				requires[module] = version
+			}
+		}
+	}
+
+	// Check each component against requires map
+	for _, comp := range components {
+		component, ok := comp.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		name, ok := component["name"].(string)
+		if !ok {
+			continue
+		}
+
+		version, ok := component["version"].(string)
+		if !ok {
+			continue
+		}
+
+		// Check if this component has a retraction
+		// Note: Full retraction checking requires querying the module proxy
+		// For now, we check if the module appears in go.mod and mark basic retraction status
+		if reqVersion, exists := requires[name]; exists && reqVersion == version {
+			// In a real implementation, we would query:
+			// https://proxy.golang.org/{module}/@v/{version}.info
+			// and check for retraction metadata
+			// For now, we just set up the structure
+
+			// Check for retract directives in go.mod (for this module itself)
+			if e.checkLocalRetraction(data, version) {
+				if component["goenv"] == nil {
+					component["goenv"] = make(map[string]interface{})
+				}
+				goenvData := component["goenv"].(map[string]interface{})
+				goenvData["retracted"] = true
+				goenvData["retraction_reason"] = "Version retracted in go.mod"
+			}
+		}
+	}
+
+	return nil
+}
+
+// checkLocalRetraction checks if a version is retracted in the local go.mod
+func (e *Enhancer) checkLocalRetraction(goModData []byte, version string) bool {
+	// Parse retract directives from go.mod
+	lines := strings.Split(string(goModData), "\n")
+	inRetract := false
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		if strings.HasPrefix(line, "retract (") {
+			inRetract = true
+			continue
+		}
+		if inRetract && line == ")" {
+			inRetract = false
+			continue
+		}
+
+		// Check for retract statements
+		if strings.HasPrefix(line, "retract ") || (inRetract && line != "" && !strings.HasPrefix(line, "//")) {
+			line = strings.TrimPrefix(line, "retract ")
+			line = strings.TrimSpace(line)
+
+			// Simple version match
+			if strings.Contains(line, version) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // makeDeterministic ensures reproducible output
