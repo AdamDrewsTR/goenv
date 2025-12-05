@@ -104,6 +104,7 @@ func init() {
 	sbomCmd.AddCommand(sbomProjectCmd)
 	sbomCmd.AddCommand(sbomHashCmd)
 	sbomCmd.AddCommand(sbomVerifyCmd)
+	sbomCmd.AddCommand(sbomValidateCmd)
 	cmdpkg.RootCmd.AddCommand(sbomCmd)
 }
 
@@ -152,14 +153,44 @@ Examples:
 	RunE: runSBOMVerify,
 }
 
+var sbomValidateCmd = &cobra.Command{
+	Use:   "validate <sbom-file>",
+	Short: "Validate SBOM against policy rules",
+	Long: `Validate an SBOM file against defined policy rules.
+
+Policy files are YAML documents that define validation rules for:
+- Supply chain security (replace directives, vendoring)
+- Security requirements (CGO status, retracted versions)
+- Completeness checks (required components, metadata)
+- License compliance (allowed/blocked licenses)
+
+Examples:
+  # Validate with default policy
+  goenv sbom validate sbom.json --policy=.goenv-policy.yaml
+
+  # Validate and fail on warnings
+  goenv sbom validate sbom.json --policy=policy.yaml --fail-on-warning
+
+  # Validate with verbose output
+  goenv sbom validate sbom.json --policy=policy.yaml --verbose`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSBOMValidate,
+}
+
 var (
-	hashAlgorithm string
-	verifyDiff    bool
+	hashAlgorithm   string
+	verifyDiff      bool
+	policyFile      string
+	failOnWarning   bool
+	verboseValidate bool
 )
 
 func init() {
 	sbomHashCmd.Flags().StringVar(&hashAlgorithm, "algorithm", "sha256", "Hash algorithm (sha256, sha512)")
 	sbomVerifyCmd.Flags().BoolVar(&verifyDiff, "diff", false, "Show detailed differences if SBOMs don't match")
+	sbomValidateCmd.Flags().StringVarP(&policyFile, "policy", "p", ".goenv-policy.yaml", "Path to policy configuration file")
+	sbomValidateCmd.Flags().BoolVar(&failOnWarning, "fail-on-warning", false, "Treat warnings as failures")
+	sbomValidateCmd.Flags().BoolVar(&verboseValidate, "verbose", false, "Show detailed validation output")
 }
 
 func runSBOMHash(cmd *cobra.Command, args []string) error {
@@ -225,6 +256,91 @@ func runSBOMVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	return fmt.Errorf("SBOMs are not reproducibly identical")
+}
+
+func runSBOMValidate(cmd *cobra.Command, args []string) error {
+	sbomPath := args[0]
+
+	// Verify SBOM file exists
+	if !utils.FileExists(sbomPath) {
+		return fmt.Errorf("SBOM file not found: %s", sbomPath)
+	}
+
+	// Verify policy file exists
+	if !utils.FileExists(policyFile) {
+		return fmt.Errorf("policy file not found: %s (use --policy to specify)", policyFile)
+	}
+
+	cfg, _ := cmdutil.SetupContext()
+
+	// Load policy engine
+	engine, err := sbom.NewPolicyEngine(policyFile)
+	if err != nil {
+		return errors.FailedTo("load policy", err)
+	}
+
+	if cfg.Debug || verboseValidate {
+		fmt.Fprintf(cmd.ErrOrStderr(), "goenv: Validating %s against policy %s\n", sbomPath, policyFile)
+	}
+
+	// Run validation
+	result, err := engine.Validate(sbomPath)
+	if err != nil {
+		return errors.FailedTo("validate SBOM", err)
+	}
+
+	// Output results
+	if verboseValidate {
+		fmt.Fprint(cmd.OutOrStdout(), result.Summary)
+
+		// Show detailed violations
+		if len(result.Violations) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nViolations:\n")
+			for i, v := range result.Violations {
+				fmt.Fprintf(cmd.OutOrStdout(), "\n%d. %s\n", i+1, v.Rule)
+				fmt.Fprintf(cmd.OutOrStdout(), "   Severity: %s\n", v.Severity)
+				fmt.Fprintf(cmd.OutOrStdout(), "   Component: %s\n", v.Component)
+				fmt.Fprintf(cmd.OutOrStdout(), "   Message: %s\n", v.Message)
+				if v.Remediation != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "   Remediation: %s\n", v.Remediation)
+				}
+			}
+		}
+
+		if len(result.Warnings) > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nWarnings:\n")
+			for i, w := range result.Warnings {
+				fmt.Fprintf(cmd.OutOrStdout(), "\n%d. %s\n", i+1, w.Rule)
+				fmt.Fprintf(cmd.OutOrStdout(), "   Severity: %s\n", w.Severity)
+				fmt.Fprintf(cmd.OutOrStdout(), "   Component: %s\n", w.Component)
+				fmt.Fprintf(cmd.OutOrStdout(), "   Message: %s\n", w.Message)
+				if w.Remediation != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "   Remediation: %s\n", w.Remediation)
+				}
+			}
+		}
+	} else {
+		// Concise output
+		if result.Passed {
+			fmt.Fprintf(cmd.OutOrStdout(), "✓ SBOM validation passed\n")
+		} else {
+			fmt.Fprintf(cmd.ErrOrStderr(), "✗ SBOM validation failed\n")
+			fmt.Fprintf(cmd.ErrOrStderr(), "  %d violations, %d warnings\n",
+				len(result.Violations), len(result.Warnings))
+			fmt.Fprintf(cmd.ErrOrStderr(), "  Run with --verbose for details\n")
+		}
+	}
+
+	// Return error if validation failed
+	if !result.Passed {
+		if failOnWarning && len(result.Warnings) > 0 {
+			return fmt.Errorf("validation failed with %d violations and %d warnings",
+				len(result.Violations), len(result.Warnings))
+		}
+		return fmt.Errorf("validation failed with %d violations", len(result.Violations))
+	}
+
+	return nil
 }
 
 func runSBOMProject(cmd *cobra.Command, args []string) error {
