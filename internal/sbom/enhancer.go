@@ -349,10 +349,121 @@ func (e *Enhancer) injectMetadata(sbom map[string]interface{}, metadata *GoenvMe
 		sbom["metadata"] = metadataSection
 	}
 
-	// Add goenv section
-	metadataSection["goenv"] = metadata
+	// CycloneDX requires custom properties in a "properties" array
+	// Convert metadata to properties format
+	properties := e.convertMetadataToProperties(metadata)
+
+	// Get or create properties array
+	var existingProps []interface{}
+	if props, ok := metadataSection["properties"].([]interface{}); ok {
+		existingProps = props
+	}
+
+	// Append goenv properties
+	metadataSection["properties"] = append(existingProps, properties...)
 
 	return nil
+}
+
+// convertMetadataToProperties converts GoenvMetadata to CycloneDX properties format
+func (e *Enhancer) convertMetadataToProperties(metadata *GoenvMetadata) []interface{} {
+	properties := []interface{}{}
+
+	// Add Go version
+	properties = append(properties, map[string]interface{}{
+		"name":  "goenv:go_version",
+		"value": metadata.GoVersion,
+	})
+
+	// Add platform
+	properties = append(properties, map[string]interface{}{
+		"name":  "goenv:platform",
+		"value": metadata.Platform,
+	})
+
+	// Add timestamp
+	if metadata.Timestamp != "" {
+		properties = append(properties, map[string]interface{}{
+			"name":  "goenv:timestamp",
+			"value": metadata.Timestamp,
+		})
+	}
+
+	// Add build context
+	if metadata.BuildContext != nil {
+		bc := metadata.BuildContext
+		properties = append(properties, map[string]interface{}{
+			"name":  "goenv:build_context.cgo_enabled",
+			"value": fmt.Sprintf("%t", bc.CgoEnabled),
+		})
+		properties = append(properties, map[string]interface{}{
+			"name":  "goenv:build_context.goos",
+			"value": bc.GOOS,
+		})
+		properties = append(properties, map[string]interface{}{
+			"name":  "goenv:build_context.goarch",
+			"value": bc.GOARCH,
+		})
+		properties = append(properties, map[string]interface{}{
+			"name":  "goenv:build_context.compiler",
+			"value": bc.Compiler,
+		})
+
+		if len(bc.Tags) > 0 {
+			tagsJSON, _ := json.Marshal(bc.Tags)
+			properties = append(properties, map[string]interface{}{
+				"name":  "goenv:build_context.tags",
+				"value": string(tagsJSON),
+			})
+		}
+
+		if bc.LDFlags != "" {
+			properties = append(properties, map[string]interface{}{
+				"name":  "goenv:build_context.ldflags",
+				"value": bc.LDFlags,
+			})
+		}
+	}
+
+	// Add module context
+	if metadata.ModuleContext != nil {
+		mc := metadata.ModuleContext
+		properties = append(properties, map[string]interface{}{
+			"name":  "goenv:module_context.vendored",
+			"value": fmt.Sprintf("%t", mc.Vendored),
+		})
+
+		if mc.GoModDigest != "" {
+			properties = append(properties, map[string]interface{}{
+				"name":  "goenv:module_context.go_mod_digest",
+				"value": mc.GoModDigest,
+			})
+		}
+
+		if mc.GoSumDigest != "" {
+			properties = append(properties, map[string]interface{}{
+				"name":  "goenv:module_context.go_sum_digest",
+				"value": mc.GoSumDigest,
+			})
+		}
+
+		if mc.ModuleProxy != "" {
+			properties = append(properties, map[string]interface{}{
+				"name":  "goenv:module_context.module_proxy",
+				"value": mc.ModuleProxy,
+			})
+		}
+
+		if len(mc.Replaces) > 0 {
+			replacesJSON, _ := json.Marshal(mc.Replaces)
+			properties = append(properties, map[string]interface{}{
+				"name":  "goenv:module_context.replaces",
+				"value": string(replacesJSON),
+			})
+		}
+	}
+
+	return properties
 }
 
 // enhanceComponents adds Go-specific data to individual components
