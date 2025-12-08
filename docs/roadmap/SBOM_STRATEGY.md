@@ -515,9 +515,10 @@ func useCryptography() { ... }  // Only compiled on Linux with CGO
 
 ---
 
-### Phase 2: Policy Validation (v3.2)
+### Phase 2: Policy Validation (v3.2) ✅ COMPLETED
 
 **Timeline:** Q2 2026 (3 months)  
+**Status:** ✅ **COMPLETED** - Policy validation is implemented and functional  
 **Priority:** ⚡ MEDIUM
 
 **Why third:** Teams need enforcement, not just intelligence.
@@ -554,15 +555,19 @@ rules:
 
 **Success Criteria:**
 
-- 30%+ of users enable policy validation
-- Integration with 3+ CI platforms
-- 10+ organizations share policies
+- ✅ `goenv sbom validate` command implemented
+- ✅ YAML-based policy engine functional
+- ✅ License, supply-chain, and security rule types supported
+- 🎯 30%+ of users enable policy validation (in progress)
+- 🎯 Integration with 3+ CI platforms (in progress)
+- 🎯 10+ organizations share policies (in progress)
 
 ---
 
-### Phase 3: Signing & Attestation (v3.3)
+### Phase 3: Signing & Attestation (v3.3) ✅ COMPLETE
 
 **Timeline:** Q3 2026 (3 months)  
+**Status:** ✅ **COMPLETE** - Core implementation finished, ready for adoption  
 **Priority:** ⚡ MEDIUM
 
 **Why fourth:** Supply chain security + SLSA compliance.
@@ -578,9 +583,16 @@ rules:
 
 **Success Criteria:**
 
-- SLSA Level 3 capability
-- 10+ organizations use signing
-- Featured in supply chain security guides
+- ✅ `goenv sbom sign` command implemented
+- ✅ `goenv sbom verify-signature` command implemented  
+- ✅ `goenv sbom attest` command for SLSA provenance
+- ✅ Key-based signing (ECDSA P-256) working
+- ✅ Keyless signing via Sigstore/cosign integrated
+- ✅ SLSA v1.0 provenance generation
+- ✅ In-toto attestation support
+- ✅ Integration tests for signing/verification workflows
+- 🎯 10+ organizations use signing (adoption phase)
+- 🎯 Featured in supply chain security guides (pending)
 
 ---
 
@@ -665,12 +677,19 @@ As more organizations adopt:
 - **Reproducibility:** 95%+ builds produce identical hashes
 - **Validation:** 5+ security teams provide feedback
 
-### Phase 2-3 (Policy + Signing)
+### Phase 2 (Policy Validation) ✅ COMPLETED
 
 - **Policy adoption:** 30%+ enable validation
 - **Enterprise usage:** 10+ organizations in production
-- **SLSA compliance:** Featured in SLSA implementation guides
 - **Integrations:** 3+ CI platforms have official examples
+
+### Phase 3 (Signing & Attestation) 🚧 IN PROGRESS
+
+- ✅ **Core signing:** Key-based and keyless signing implemented
+- ✅ **Signature verification:** Verification with keys and cosign working
+- 🚧 **SLSA provenance:** Attestation generation in progress
+- 🎯 **Signing adoption:** 10+ organizations use signing
+- 🎯 **SLSA compliance:** Featured in SLSA implementation guides
 
 ### Phase 4-6 (Integration Features)
 

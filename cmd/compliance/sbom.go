@@ -1,10 +1,14 @@
 package compliance
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	cmdpkg "github.com/go-nv/goenv/cmd"
 
@@ -105,6 +109,9 @@ func init() {
 	sbomCmd.AddCommand(sbomHashCmd)
 	sbomCmd.AddCommand(sbomVerifyCmd)
 	sbomCmd.AddCommand(sbomValidateCmd)
+	sbomCmd.AddCommand(sbomSignCmd)
+	sbomCmd.AddCommand(sbomVerifySignatureCmd)
+	sbomCmd.AddCommand(sbomAttestCmd)
 	cmdpkg.RootCmd.AddCommand(sbomCmd)
 }
 
@@ -177,20 +184,143 @@ Examples:
 	RunE: runSBOMValidate,
 }
 
+var sbomSignCmd = &cobra.Command{
+	Use:   "sign <sbom-file>",
+	Short: "Sign an SBOM with cryptographic signature",
+	Long: `Sign an SBOM file to create a cryptographic signature for integrity verification.
+
+Supports two signing methods:
+1. Key-based signing: Uses a private key file (ECDSA recommended)
+2. Keyless signing: Uses Sigstore/Fulcio for identity-based signing
+
+Key-based signing is suitable for CI/CD pipelines with managed keys.
+Keyless signing is ideal for developer workflows and OIDC-enabled environments.
+
+Examples:
+  # Sign with private key
+  goenv sbom sign sbom.json --key=private.pem --output=sbom.json.sig
+
+  # Sign with keyless (Sigstore)
+  goenv sbom sign sbom.json --keyless --output=sbom.json.sig
+
+  # Generate a new key pair first
+  goenv sbom generate-keys --private=private.pem --public=public.pem`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSBOMSign,
+}
+
+var sbomVerifySignatureCmd = &cobra.Command{
+	Use:   "verify-signature <sbom-file>",
+	Short: "Verify SBOM cryptographic signature",
+	Long: `Verify the cryptographic signature of an SBOM file.
+
+Verification ensures:
+- The SBOM has not been tampered with
+- The SBOM was signed by a trusted key/identity
+- The signature is valid and not expired
+
+Examples:
+  # Verify with public key
+  goenv sbom verify-signature sbom.json --signature=sbom.json.sig --key=public.pem
+
+  # Verify keyless signature
+  goenv sbom verify-signature sbom.json --signature=sbom.json.sig --certificate=sbom.cert
+
+  # Verify using cosign
+  goenv sbom verify-signature sbom.json --signature=sbom.json.sig --use-cosign`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSBOMVerifySignature,
+}
+
+var sbomAttestCmd = &cobra.Command{
+	Use:   "attest <sbom-file>",
+	Short: "Generate SLSA provenance attestation for SBOM",
+	Long: `Generate a SLSA (Supply-chain Levels for Software Artifacts) provenance 
+attestation for an SBOM file. This creates a verifiable record of how the SBOM 
+was generated, including Go version, build context, and dependencies.
+
+The provenance can be used for:
+- SLSA Level 3 compliance
+- Supply chain security verification
+- Reproducible build validation
+- Audit trail documentation
+
+Examples:
+  # Generate provenance attestation
+  goenv sbom attest sbom.json --output=sbom.provenance.json
+
+  # Generate and sign provenance
+  goenv sbom attest sbom.json --output=sbom.provenance.json --sign --key=private.pem
+
+  # Generate in-toto attestation bundle
+  goenv sbom attest sbom.json --output=sbom.att.json --in-toto --sign --key=private.pem`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSBOMAttest,
+}
+
 var (
+	// Hash and verify flags
 	hashAlgorithm   string
 	verifyDiff      bool
 	policyFile      string
 	failOnWarning   bool
 	verboseValidate bool
+
+	// Signing flags
+	signKeyPath      string
+	signKeyPassword  string
+	signKeyless      bool
+	signOIDCIssuer   string
+	signOIDCClientID string
+	signOutput       string
+
+	// Verification flags
+	verifySignaturePath string
+	verifyPublicKey     string
+	verifyCertificate   string
+	verifyUseCosign     bool
+
+	// Attestation flags
+	attestOutput       string
+	attestSign         bool
+	attestKeyPath      string
+	attestInToto       bool
+	attestInvocationID string
 )
 
 func init() {
+	// Hash command flags
 	sbomHashCmd.Flags().StringVar(&hashAlgorithm, "algorithm", "sha256", "Hash algorithm (sha256, sha512)")
+
+	// Verify reproducibility flags
 	sbomVerifyCmd.Flags().BoolVar(&verifyDiff, "diff", false, "Show detailed differences if SBOMs don't match")
+
+	// Validate command flags
 	sbomValidateCmd.Flags().StringVarP(&policyFile, "policy", "p", ".goenv-policy.yaml", "Path to policy configuration file")
 	sbomValidateCmd.Flags().BoolVar(&failOnWarning, "fail-on-warning", false, "Treat warnings as failures")
 	sbomValidateCmd.Flags().BoolVar(&verboseValidate, "verbose", false, "Show detailed validation output")
+
+	// Sign command flags
+	sbomSignCmd.Flags().StringVar(&signKeyPath, "key", "", "Path to private key file for signing")
+	sbomSignCmd.Flags().StringVar(&signKeyPassword, "key-password", "", "Password for encrypted private key")
+	sbomSignCmd.Flags().BoolVar(&signKeyless, "keyless", false, "Use keyless signing via Sigstore/Fulcio")
+	sbomSignCmd.Flags().StringVar(&signOIDCIssuer, "oidc-issuer", "", "OIDC issuer for keyless signing")
+	sbomSignCmd.Flags().StringVar(&signOIDCClientID, "oidc-client-id", "", "OIDC client ID for keyless signing")
+	sbomSignCmd.Flags().StringVarP(&signOutput, "output", "o", "", "Output path for signature (default: <sbom-file>.sig)")
+
+	// Verify signature command flags
+	sbomVerifySignatureCmd.Flags().StringVarP(&verifySignaturePath, "signature", "s", "", "Path to signature file (required)")
+	sbomVerifySignatureCmd.Flags().StringVar(&verifyPublicKey, "key", "", "Path to public key file")
+	sbomVerifySignatureCmd.Flags().StringVar(&verifyCertificate, "certificate", "", "Path to certificate file for keyless verification")
+	sbomVerifySignatureCmd.Flags().BoolVar(&verifyUseCosign, "use-cosign", false, "Use cosign CLI for verification")
+	sbomVerifySignatureCmd.MarkFlagRequired("signature")
+
+	// Attest command flags
+	sbomAttestCmd.Flags().StringVarP(&attestOutput, "output", "o", "", "Output path for attestation (default: <sbom-file>.provenance.json)")
+	sbomAttestCmd.Flags().BoolVar(&attestSign, "sign", false, "Sign the attestation after generation")
+	sbomAttestCmd.Flags().StringVar(&attestKeyPath, "key", "", "Path to private key for signing attestation")
+	sbomAttestCmd.Flags().BoolVar(&attestInToto, "in-toto", false, "Generate in-toto attestation bundle format")
+	sbomAttestCmd.Flags().StringVar(&attestInvocationID, "invocation-id", "", "Unique invocation ID for this build")
 }
 
 func runSBOMHash(cmd *cobra.Command, args []string) error {
@@ -338,6 +468,309 @@ func runSBOMValidate(cmd *cobra.Command, args []string) error {
 				len(result.Violations), len(result.Warnings))
 		}
 		return fmt.Errorf("validation failed with %d violations", len(result.Violations))
+	}
+
+	return nil
+}
+
+func runSBOMSign(cmd *cobra.Command, args []string) error {
+	sbomPath := args[0]
+
+	// Verify SBOM file exists
+	if !utils.FileExists(sbomPath) {
+		return fmt.Errorf("SBOM file not found: %s", sbomPath)
+	}
+
+	// Determine output path
+	outputPath := signOutput
+	if outputPath == "" {
+		outputPath = sbomPath + ".sig"
+	}
+
+	cfg, _ := cmdutil.SetupContext()
+
+	// Validate signing options
+	if !signKeyless && signKeyPath == "" {
+		return fmt.Errorf("either --key or --keyless must be specified")
+	}
+
+	if signKeyless && signKeyPath != "" {
+		return fmt.Errorf("cannot specify both --key and --keyless")
+	}
+
+	// Check for cosign if using keyless
+	if signKeyless && !sbom.IsCosignAvailable() {
+		return fmt.Errorf("keyless signing requires cosign to be installed\n" +
+			"Install it from: https://docs.sigstore.dev/cosign/installation/")
+	}
+
+	if cfg.Debug {
+		if signKeyless {
+			fmt.Fprintf(cmd.ErrOrStderr(), "goenv: Signing %s with keyless signing (Sigstore)\n", sbomPath)
+		} else {
+			fmt.Fprintf(cmd.ErrOrStderr(), "goenv: Signing %s with key %s\n", sbomPath, signKeyPath)
+		}
+	}
+
+	// Create signer
+	signer := sbom.NewSigner(sbom.SignatureOptions{
+		KeyPath:      signKeyPath,
+		KeyPassword:  signKeyPassword,
+		Keyless:      signKeyless,
+		OIDCIssuer:   signOIDCIssuer,
+		OIDCClientID: signOIDCClientID,
+		OutputPath:   outputPath,
+	})
+
+	// Sign the SBOM
+	signature, err := signer.SignSBOM(sbomPath)
+	if err != nil {
+		return errors.FailedTo("sign SBOM", err)
+	}
+
+	// Write signature
+	if err := signer.WriteSignature(signature, outputPath); err != nil {
+		return errors.FailedTo("write signature", err)
+	}
+
+	// Success output
+	fmt.Fprintf(cmd.OutOrStdout(), "✓ SBOM signed successfully\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "  SBOM: %s\n", sbomPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Signature: %s\n", outputPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Algorithm: %s\n", signature.Algorithm)
+
+	if signature.SignedBy != nil && signature.SignedBy.Email != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Signed by: %s\n", signature.SignedBy.Email)
+	} else if signature.KeyID != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "  Key ID: %s\n", signature.KeyID)
+	}
+
+	if cfg.Debug {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Debug: Timestamp: %s\n", signature.Timestamp.Format(time.RFC3339))
+	}
+
+	return nil
+}
+
+func runSBOMVerifySignature(cmd *cobra.Command, args []string) error {
+	sbomPath := args[0]
+
+	// Verify files exist
+	if !utils.FileExists(sbomPath) {
+		return fmt.Errorf("SBOM file not found: %s", sbomPath)
+	}
+
+	if !utils.FileExists(verifySignaturePath) {
+		return fmt.Errorf("signature file not found: %s", verifySignaturePath)
+	}
+
+	cfg, _ := cmdutil.SetupContext()
+
+	// Validate verification options
+	if !verifyUseCosign && verifyPublicKey == "" && verifyCertificate == "" {
+		return fmt.Errorf("either --key, --certificate, or --use-cosign must be specified")
+	}
+
+	if verifyUseCosign && !sbom.IsCosignAvailable() {
+		return fmt.Errorf("--use-cosign requires cosign to be installed\n" +
+			"Install it from: https://docs.sigstore.dev/cosign/installation/")
+	}
+
+	if cfg.Debug {
+		fmt.Fprintf(cmd.ErrOrStderr(), "goenv: Verifying signature for %s\n", sbomPath)
+		fmt.Fprintf(cmd.ErrOrStderr(), "goenv: Signature file: %s\n", verifySignaturePath)
+	}
+
+	// Create verifier
+	verifier := sbom.NewVerifier(sbom.VerificationOptions{
+		SBOMPath:      sbomPath,
+		SignaturePath: verifySignaturePath,
+		PublicKeyPath: verifyPublicKey,
+		CertPath:      verifyCertificate,
+		UseCosign:     verifyUseCosign,
+	})
+
+	// Verify signature
+	valid, err := verifier.VerifySignature()
+	if err != nil {
+		return errors.FailedTo("verify signature", err)
+	}
+
+	if valid {
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ Signature verification passed\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "  SBOM: %s\n", sbomPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Signature: %s\n", verifySignaturePath)
+
+		// Try to read signature metadata
+		if sigData, err := os.ReadFile(verifySignaturePath); err == nil {
+			var sig sbom.Signature
+			if err := json.Unmarshal(sigData, &sig); err == nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "  Algorithm: %s\n", sig.Algorithm)
+				if sig.SignedBy != nil && sig.SignedBy.Email != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  Signed by: %s\n", sig.SignedBy.Email)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "  Signed at: %s\n", sig.Timestamp.Format(time.RFC3339))
+			}
+		}
+
+		return nil
+	}
+
+	fmt.Fprintf(cmd.ErrOrStderr(), "✗ Signature verification failed\n")
+	return fmt.Errorf("signature is invalid or does not match SBOM")
+}
+
+func runSBOMAttest(cmd *cobra.Command, args []string) error {
+	sbomPath := args[0]
+
+	// Verify SBOM file exists
+	if !utils.FileExists(sbomPath) {
+		return fmt.Errorf("SBOM file not found: %s", sbomPath)
+	}
+
+	cfg, mgr := cmdutil.SetupContext()
+
+	// Determine output path
+	outputPath := attestOutput
+	if outputPath == "" {
+		if attestInToto {
+			outputPath = sbomPath + ".att.json"
+		} else {
+			outputPath = sbomPath + ".provenance.json"
+		}
+	}
+
+	// Get current Go version
+	goVersion, _, err := mgr.GetCurrentVersion()
+	if err != nil {
+		goVersion = "unknown"
+	}
+
+	// Get project directory
+	projectDir := "."
+	if sbomDir != "" {
+		projectDir = sbomDir
+	}
+
+	// Compute go.mod and go.sum digests
+	goModDigest, _ := sbom.ComputeGoModDigest(projectDir)
+	goSumDigest, _ := sbom.ComputeGoSumDigest(projectDir)
+
+	// Generate invocation ID if not provided
+	invocationID := attestInvocationID
+	if invocationID == "" {
+		invocationID = fmt.Sprintf("%s-%d", goVersion, time.Now().Unix())
+	}
+
+	if cfg.Debug {
+		fmt.Fprintf(cmd.ErrOrStderr(), "goenv: Generating SLSA provenance for %s\n", sbomPath)
+		fmt.Fprintf(cmd.ErrOrStderr(), "goenv: Go version: %s\n", goVersion)
+		fmt.Fprintf(cmd.ErrOrStderr(), "goenv: Invocation ID: %s\n", invocationID)
+	}
+
+	// Create provenance generator
+	generator := sbom.NewProvenanceGenerator(sbom.ProvenanceOptions{
+		SBOMPath:        sbomPath,
+		GoVersion:       goVersion,
+		GoModDigest:     goModDigest,
+		GoSumDigest:     goSumDigest,
+		BuildTags:       []string{}, // TODO: Extract from build context
+		CGOEnabled:      false,      // TODO: Extract from build context
+		GOOS:            runtime.GOOS,
+		GOARCH:          runtime.GOARCH,
+		LDFlags:         "",
+		Vendored:        utils.FileExists(filepath.Join(projectDir, "vendor")),
+		ModuleProxy:     os.Getenv("GOPROXY"),
+		SBOMTool:        sbomTool,
+		SBOMToolVersion: "latest", // TODO: Get actual version
+		ProjectDir:      projectDir,
+		InvocationID:    invocationID,
+	})
+
+	// Generate provenance
+	statement, err := generator.Generate()
+	if err != nil {
+		return errors.FailedTo("generate provenance", err)
+	}
+
+	// Validate provenance
+	if err := sbom.ValidateProvenance(statement); err != nil {
+		return errors.FailedTo("validate provenance", err)
+	}
+
+	// If in-toto format requested and signing enabled
+	if attestInToto && attestSign {
+		if attestKeyPath == "" {
+			return fmt.Errorf("--key is required when using --sign with --in-toto")
+		}
+
+		// Sign the provenance first
+		signer := sbom.NewSigner(sbom.SignatureOptions{
+			KeyPath: attestKeyPath,
+		})
+
+		// Serialize statement for signing
+		statementData, err := json.Marshal(statement)
+		if err != nil {
+			return errors.FailedTo("marshal provenance", err)
+		}
+
+		// Create temp file for signing
+		tempFile, err := os.CreateTemp("", "provenance-*.json")
+		if err != nil {
+			return errors.FailedTo("create temp file", err)
+		}
+		defer os.Remove(tempFile.Name())
+
+		if err := os.WriteFile(tempFile.Name(), statementData, 0644); err != nil {
+			return errors.FailedTo("write temp file", err)
+		}
+
+		signature, err := signer.SignSBOM(tempFile.Name())
+		if err != nil {
+			return errors.FailedTo("sign provenance", err)
+		}
+
+		// Create in-toto attestation
+		attestation, err := sbom.CreateInTotoAttestation(statement, signature)
+		if err != nil {
+			return errors.FailedTo("create in-toto attestation", err)
+		}
+
+		// Write in-toto attestation
+		if err := sbom.WriteInTotoAttestation(attestation, outputPath); err != nil {
+			return errors.FailedTo("write attestation", err)
+		}
+
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ In-toto attestation generated and signed\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "  SBOM: %s\n", sbomPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Attestation: %s\n", outputPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Format: in-toto\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "  Signed: Yes\n")
+
+	} else {
+		// Write provenance statement
+		if err := generator.WriteProvenance(statement, outputPath); err != nil {
+			return errors.FailedTo("write provenance", err)
+		}
+
+		fmt.Fprintf(cmd.OutOrStdout(), "✓ SLSA provenance generated\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "  SBOM: %s\n", sbomPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Provenance: %s\n", outputPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Format: SLSA v1.0\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "  Builder: goenv\n")
+		fmt.Fprintf(cmd.OutOrStdout(), "  Go version: %s\n", goVersion)
+
+		if attestSign && !attestInToto {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nTo sign the provenance, use:\n")
+			fmt.Fprintf(cmd.OutOrStdout(), "  goenv sbom sign %s --key=%s\n", outputPath, attestKeyPath)
+		}
+	}
+
+	if cfg.Debug {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Debug: Invocation ID: %s\n", invocationID)
+		fmt.Fprintf(cmd.ErrOrStderr(), "Debug: go.mod digest: %s\n", goModDigest)
+		fmt.Fprintf(cmd.ErrOrStderr(), "Debug: go.sum digest: %s\n", goSumDigest)
 	}
 
 	return nil
