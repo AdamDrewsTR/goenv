@@ -605,18 +605,39 @@ rules:
 
 **Features:**
 
+#### Phase 4A: Open Source Scanner Integration
+- **Grype** (Anchore) - Fast, offline vulnerability scanning
+- **Trivy** (Aqua Security) - Kubernetes-native, container scanning
+- Local scanning workflows
+- No licensing costs
+
+#### Phase 4B: Commercial Scanner Integration
+- **Snyk** - Developer-focused, fix guidance, IDE/CLI/CI integration
+- **Veracode** - Enterprise compliance, governance, regulated industries
+- API-based SBOM upload
+- Enhanced vulnerability context
+
+#### Phase 5: Automation & Compliance
 - SBOM diffing and drift detection
-- Vulnerability scanner integration (Grype, Trivy)
-- Hooks for automatic generation
-- Compliance reporting (SOC 2, ISO 27001)
+- Hooks for automatic generation (pre-commit, CI/CD)
+- Compliance reporting (SOC 2, ISO 27001, SLSA, SSDF)
+- Policy enforcement in pipelines
+
+#### Phase 6: Analytics & Operations
 - Batch operations for multiple projects
 - Historical analysis and dashboards
+- Trend analysis for dependency health
+- Vulnerability exposure tracking
+
+**Scanner Integration Value Prop:**
+> "goenv feeds Go-aware SBOMs to any scanner—open source or commercial—ensuring 40% better vulnerability coverage through stdlib detection and build context."
 
 **Note:** These features build on the foundation but depend on:
 
 - Community adoption of early phases
 - Security team feedback and validation
 - Partnership opportunities with scanner vendors
+- Snyk/Veracode API access and validation
 
 ---
 
@@ -695,10 +716,25 @@ As more organizations adopt:
 
 ### Phase 4-6 (Integration Features)
 
-- **Scanner integration:** 20%+ use vuln scanning
-- **Compliance:** 5+ frameworks supported (SOC 2, ISO, SLSA, SSDF)
-- **Ecosystem:** 100+ organizations share policies/examples
+#### Phase 4A (Open Source Scanners)
+- **Grype integration:** 15%+ users scan with Grype
+- **Trivy integration:** 15%+ users scan with Trivy
+- **Implementation:** Upload endpoints, result parsing, CI examples
+
+#### Phase 4B (Commercial Scanners)
+- **Snyk integration:** 10%+ users with Snyk licenses
+- **Veracode integration:** 5+ enterprise customers
+- **API validation:** Successful SBOM uploads to both platforms
+
+#### Phase 5 (Automation & Compliance)
+- **Compliance reporting:** 5+ frameworks supported (SOC 2, ISO 27001, SLSA, SSDF)
+- **CI/CD hooks:** 3+ platforms with automation examples
+- **SBOM diffing:** Drift detection across releases
+
+#### Phase 6 (Analytics)
+- **Ecosystem growth:** 100+ organizations share policies/examples
 - **Recognition:** Featured in CNCF/OSSF security resources
+- **Dashboards:** Historical vulnerability tracking
 
 ---
 
