@@ -43,6 +43,12 @@ func DefaultHookConfig() HookConfig {
 
 // NewHookManager creates a new hook manager
 func NewHookManager(repoPath string) (*HookManager, error) {
+	return NewHookManagerWithGoenv(repoPath, "")
+}
+
+// NewHookManagerWithGoenv creates a new hook manager with a specified goenv path
+// If goenvPath is empty, it will attempt to locate it automatically
+func NewHookManagerWithGoenv(repoPath, goenvPath string) (*HookManager, error) {
 	if repoPath == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -62,10 +68,12 @@ func NewHookManager(repoPath string) (*HookManager, error) {
 		return nil, fmt.Errorf("git hooks directory not found: %w", err)
 	}
 
-	// Find goenv executable
-	goenvPath, err := findGoenvExecutable()
-	if err != nil {
-		return nil, fmt.Errorf("failed to locate goenv: %w", err)
+	// Find goenv executable if not provided
+	if goenvPath == "" {
+		goenvPath, err = findGoenvExecutable()
+		if err != nil {
+			return nil, fmt.Errorf("failed to locate goenv: %w", err)
+		}
 	}
 
 	return &HookManager{

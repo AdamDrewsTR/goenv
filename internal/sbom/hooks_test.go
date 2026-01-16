@@ -41,7 +41,8 @@ func TestNewHookManager(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := tt.setup(t)
 
-			manager, err := NewHookManager(dir)
+			// Use mock goenv path for testing
+			manager, err := NewHookManagerWithGoenv(dir, "/usr/bin/goenv")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewHookManager() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -75,7 +76,7 @@ func TestHookManager_InstallHook(t *testing.T) {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
 
-	manager, err := NewHookManager(repoDir)
+	manager, err := NewHookManagerWithGoenv(repoDir, "/usr/bin/goenv")
 	if err != nil {
 		t.Fatalf("NewHookManager() error = %v", err)
 	}
@@ -189,7 +190,7 @@ func TestHookManager_UninstallHook(t *testing.T) {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
 
-	manager, err := NewHookManager(repoDir)
+	manager, err := NewHookManagerWithGoenv(repoDir, "/usr/bin/goenv")
 	if err != nil {
 		t.Fatalf("NewHookManager() error = %v", err)
 	}
@@ -256,7 +257,7 @@ func TestHookManager_IsHookInstalled(t *testing.T) {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
 
-	manager, err := NewHookManager(repoDir)
+	manager, err := NewHookManagerWithGoenv(repoDir, "/usr/bin/goenv")
 	if err != nil {
 		t.Fatalf("NewHookManager() error = %v", err)
 	}
@@ -323,7 +324,7 @@ func TestHookManager_GetHookStatus(t *testing.T) {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
 
-	manager, err := NewHookManager(repoDir)
+	manager, err := NewHookManagerWithGoenv(repoDir, "/usr/bin/goenv")
 	if err != nil {
 		t.Fatalf("NewHookManager() error = %v", err)
 	}
@@ -462,7 +463,7 @@ func TestGenerateHookScript(t *testing.T) {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
 
-	manager, err := NewHookManager(repoDir)
+	manager, err := NewHookManagerWithGoenv(repoDir, "/usr/bin/goenv")
 	if err != nil {
 		t.Fatalf("NewHookManager() error = %v", err)
 	}
