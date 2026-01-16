@@ -16,6 +16,8 @@
 /goenv
 goenv-*
 *.exe
+coverage.out
+*.out
 
 // No docs at root
 /*.md

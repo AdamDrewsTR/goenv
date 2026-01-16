@@ -699,10 +699,29 @@ goenv sbom scan sbom.json --scanner=veracode
   - CI/CD integration with --fail-on-drift flag
   - Baseline management (save, list, delete)
 
+- ✅ Git hooks for automatic SBOM generation (goenv sbom hooks)
+  - Automatic pre-commit hook installation
+  - Detects go.mod or go.sum changes
+  - Auto-generates and stages SBOM files
+  - Configurable output path and format
+  - Fail-on-error option for strict enforcement
+  - Quiet mode for CI/CD environments
+  - Safe uninstall (only removes goenv-managed hooks)
+
+- ✅ CI/CD pipeline integration (goenv sbom ci check, goenv sbom ci scan)
+  - Automatic CI platform detection (GitHub Actions, GitLab CI, CircleCI, Jenkins, Azure Pipelines)
+  - SBOM staleness validation against go.mod/go.sum changes
+  - Maximum age checking with configurable duration
+  - Vulnerability scanning with threshold-based pass/fail
+  - Platform-specific output formatting (GitHub Actions annotations, GitLab CI format)
+  - SARIF 2.1.0 export for GitHub Code Scanning integration
+  - JSON output for reporting and archival
+  - Exit code management for pipeline control
+  - Severity-based thresholds (critical, high, medium, low)
+
 **Planned:**
-- Git hooks for automatic generation (pre-commit, CI/CD)
 - Compliance reporting (SOC 2, ISO 27001, SLSA, SSDF)
-- Policy enforcement in pipelines
+- Policy enforcement engine with YAML configuration
 
 #### Phase 6: Analytics & Operations
 - Batch operations for multiple projects
@@ -808,14 +827,14 @@ As more organizations adopt:
 - 🎯 **CI/CD integration:** Examples provided for GitHub, GitLab, Jenkins
 
 #### Phase 4B (Commercial Scanners) ✅ COMPLETE
-- **Snyk integration:** 10%+ users with Snyk licenses
-- **Veracode integration:** 5+ enterprise customers
+- ✅ **Snyk integration:** 10%+ users with Snyk licenses
+- ✅ **Veracode integration:** 5+ enterprise customers
 - **API validation:** Successful SBOM uploads to both platforms
 
 #### Phase 5 (Automation & Compliance)
 - **Compliance reporting:** 5+ frameworks supported (SOC 2, ISO 27001, SLSA, SSDF)
 - **CI/CD hooks:** 3+ platforms with automation examples
-- **SBOM diffing:** Drift detection across releases
+- ✅ **SBOM diffing:** Drift detection across releases
 
 #### Phase 6 (Analytics)
 - **Ecosystem growth:** 100+ organizations share policies/examples
