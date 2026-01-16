@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -128,14 +129,16 @@ func TestHookManager_InstallHook(t *testing.T) {
 					return
 				}
 
-				// Verify hook is executable
-				info, err := os.Stat(hookPath)
-				if err != nil {
-					t.Errorf("failed to stat hook: %v", err)
-					return
-				}
-				if info.Mode()&0111 == 0 {
-					t.Error("hook is not executable")
+				// Verify hook is executable (Unix only - Windows uses extensions)
+				if runtime.GOOS != "windows" {
+					info, err := os.Stat(hookPath)
+					if err != nil {
+						t.Errorf("failed to stat hook: %v", err)
+						return
+					}
+					if info.Mode()&0111 == 0 {
+						t.Error("hook is not executable")
+					}
 				}
 
 				// Verify hook content

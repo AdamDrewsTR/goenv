@@ -11,6 +11,22 @@ import (
 	"github.com/go-nv/goenv/internal/manager"
 )
 
+// sanitizeTestName replaces characters invalid in Windows paths
+func sanitizeTestName(name string) string {
+	replacer := strings.NewReplacer(
+		":", "_",
+		"<", "_",
+		">", "_",
+		"\"", "_",
+		"/", "_",
+		"\\", "_",
+		"|", "_",
+		"?", "_",
+		"*", "_",
+	)
+	return replacer.Replace(name)
+}
+
 func TestComputeSBOMDigest(t *testing.T) {
 	tempDir := t.TempDir()
 	sbomPath := filepath.Join(tempDir, "sbom.json")
@@ -268,7 +284,7 @@ func TestBuildConstraintAnalysis(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			testDir := filepath.Join(tempDir, tt.name)
+			testDir := filepath.Join(tempDir, sanitizeTestName(tt.name))
 			os.MkdirAll(testDir, 0755)
 
 			if err := os.WriteFile(filepath.Join(testDir, tt.filename), []byte(tt.content), 0644); err != nil {
