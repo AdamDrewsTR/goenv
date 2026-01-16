@@ -401,7 +401,8 @@ func runSBOMValidate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("policy file not found: %s (use --policy to specify)", policyFile)
 	}
 
-	cfg, _ := cmdutil.SetupContext()
+	ctx := cmdutil.GetContexts(cmd)
+	cfg := ctx.Config
 
 	// Load policy engine
 	engine, err := sbom.NewPolicyEngine(policyFile)
@@ -487,7 +488,8 @@ func runSBOMSign(cmd *cobra.Command, args []string) error {
 		outputPath = sbomPath + ".sig"
 	}
 
-	cfg, _ := cmdutil.SetupContext()
+	ctx := cmdutil.GetContexts(cmd)
+	cfg := ctx.Config
 
 	// Validate signing options
 	if !signKeyless && signKeyPath == "" {
@@ -564,7 +566,8 @@ func runSBOMVerifySignature(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("signature file not found: %s", verifySignaturePath)
 	}
 
-	cfg, _ := cmdutil.SetupContext()
+	ctx := cmdutil.GetContexts(cmd)
+	cfg := ctx.Config
 
 	// Validate verification options
 	if !verifyUseCosign && verifyPublicKey == "" && verifyCertificate == "" {
@@ -628,7 +631,8 @@ func runSBOMAttest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("SBOM file not found: %s", sbomPath)
 	}
 
-	cfg, mgr := cmdutil.SetupContext()
+	ctx := cmdutil.GetContexts(cmd)
+	cfg, mgr := ctx.Config, ctx.Manager
 
 	// Determine output path
 	outputPath := attestOutput

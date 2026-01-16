@@ -13,7 +13,7 @@ import (
 
 func main() {
 	cfg := config.Load()
-	mgr := manager.NewManager(cfg)
+	mgr := manager.NewManager(cfg, nil)
 	enhancer := sbom.NewEnhancer(cfg, mgr)
 
 	// Test stdlib detection on current directory (goenv root)
