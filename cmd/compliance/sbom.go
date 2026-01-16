@@ -112,6 +112,7 @@ func init() {
 	sbomCmd.AddCommand(sbomSignCmd)
 	sbomCmd.AddCommand(sbomVerifySignatureCmd)
 	sbomCmd.AddCommand(sbomAttestCmd)
+	sbomCmd.AddCommand(sbomScanCmd)
 	cmdpkg.RootCmd.AddCommand(sbomCmd)
 }
 
@@ -1004,4 +1005,285 @@ func buildSyftCommand(toolPath string, cfg *config.Config) (*exec.Cmd, error) {
 	}
 
 	return exec.Command(toolPath, args...), nil
+}
+
+var sbomScanCmd = &cobra.Command{
+	Use:   "scan <sbom-file>",
+	Short: "Scan SBOM for vulnerabilities using security scanners",
+	Long: `Scan an SBOM file for known vulnerabilities using security scanners.
+
+Supported scanners:
+
+Open Source (Phase 4A):
+- Grype (Anchore): Fast, offline vulnerability scanning
+- Trivy (Aqua Security): Kubernetes-native, container scanning
+
+Commercial/Enterprise (Phase 4B):
+- Snyk: Developer-first security with prioritized fixes
+- Veracode: Enterprise compliance and policy enforcement
+
+The scan command reads an SBOM file (CycloneDX or SPDX format) and checks all
+components against vulnerability databases to identify security issues.
+
+Results include:
+- Vulnerability ID (CVE-2023-xxxxx, GHSA-xxxx-yyyy-zzzz)
+- Affected package and version
+- Severity level (Critical, High, Medium, Low)
+- Fix information (available version with patch)
+- CVSS scores and descriptions
+
+Examples:
+  # Scan with Grype (default)
+  goenv sbom scan sbom.json
+
+  # Scan with Trivy
+  goenv sbom scan sbom.json --scanner=trivy
+
+  # Scan with Snyk (requires SNYK_TOKEN)
+  goenv sbom scan sbom.json --scanner=snyk
+
+  # Scan with Veracode (requires API credentials)
+  goenv sbom scan sbom.json --scanner=veracode
+
+  # Show only high and critical vulnerabilities
+  goenv sbom scan sbom.json --severity=high
+
+  # Show only vulnerabilities with available fixes
+  goenv sbom scan sbom.json --only-fixed
+
+  # Save results to file
+  goenv sbom scan sbom.json --output=scan-results.json
+
+  # Fail build if any vulnerabilities found
+  goenv sbom scan sbom.json --fail-on=any
+
+Phase 4A/4B: Scanner Integration (v3.4+)
+Supports both open-source and commercial scanners for comprehensive vulnerability detection.`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSBOMScan,
+}
+
+var (
+	scanScanner      string
+	scanFormat       string
+	scanOutputFormat string
+	scanOutput       string
+	scanSeverity     string
+	scanFailOn       string
+	scanOnlyFixed    bool
+	scanOffline      bool
+	scanVerbose      bool
+	scanListScanners bool
+)
+
+func init() {
+	sbomScanCmd.Flags().StringVar(&scanScanner, "scanner", "grype", "Scanner to use (grype, trivy)")
+	sbomScanCmd.Flags().StringVar(&scanFormat, "format", "cyclonedx-json", "SBOM format (cyclonedx-json, spdx-json)")
+	sbomScanCmd.Flags().StringVar(&scanOutputFormat, "output-format", "json", "Output format (json, table, sarif)")
+	sbomScanCmd.Flags().StringVarP(&scanOutput, "output", "o", "", "Output file (default: stdout)")
+	sbomScanCmd.Flags().StringVar(&scanSeverity, "severity", "", "Minimum severity to report (low, medium, high, critical)")
+	sbomScanCmd.Flags().StringVar(&scanFailOn, "fail-on", "", "Exit with error if vulnerabilities found (any, high, critical)")
+	sbomScanCmd.Flags().BoolVar(&scanOnlyFixed, "only-fixed", false, "Show only vulnerabilities with available fixes")
+	sbomScanCmd.Flags().BoolVar(&scanOffline, "offline", false, "Offline mode - skip vulnerability database updates")
+	sbomScanCmd.Flags().BoolVar(&scanVerbose, "verbose", false, "Verbose output")
+	sbomScanCmd.Flags().BoolVar(&scanListScanners, "list-scanners", false, "List available scanners and exit")
+}
+
+func runSBOMScan(cmd *cobra.Command, args []string) error {
+	// Handle --list-scanners flag
+	if scanListScanners {
+		return listScanners()
+	}
+
+	sbomPath := args[0]
+
+	// Get scanner
+	scanner, err := sbom.GetScanner(scanScanner)
+	if err != nil {
+		return err
+	}
+
+	// Check if scanner is installed
+	if !scanner.IsInstalled() {
+		fmt.Fprintf(os.Stderr, "Error: %s is not installed\n\n", scanner.Name())
+		fmt.Fprintf(os.Stderr, "%s\n", scanner.InstallationInstructions())
+		return fmt.Errorf("%s not found", scanner.Name())
+	}
+
+	// Check if scanner supports the format
+	if !scanner.SupportsFormat(scanFormat) {
+		return fmt.Errorf("%s does not support format: %s", scanner.Name(), scanFormat)
+	}
+
+	// Prepare scan options
+	opts := &sbom.ScanOptions{
+		SBOMPath:          sbomPath,
+		Format:            scanFormat,
+		OutputFormat:      scanOutputFormat,
+		OutputPath:        scanOutput,
+		SeverityThreshold: scanSeverity,
+		FailOn:            scanFailOn,
+		OnlyFixed:         scanOnlyFixed,
+		Offline:           scanOffline,
+		Verbose:           scanVerbose,
+	}
+
+	// Run scan
+	fmt.Printf("Scanning %s with %s...\n", sbomPath, scanner.Name())
+
+	ctx := cmd.Context()
+	result, err := scanner.Scan(ctx, opts)
+	if err != nil {
+		return fmt.Errorf("scan failed: %w", err)
+	}
+
+	// Display results
+	if scanOutput == "" {
+		// Print to stdout
+		return displayScanResults(result, scanOutputFormat)
+	}
+
+	fmt.Printf("✅ Scan complete: %d vulnerabilities found\n", result.Summary.Total)
+	fmt.Printf("   Critical: %d, High: %d, Medium: %d, Low: %d\n",
+		result.Summary.Critical, result.Summary.High,
+		result.Summary.Medium, result.Summary.Low)
+	fmt.Printf("   Results saved to: %s\n", scanOutput)
+
+	// Apply fail-on logic
+	return checkFailOnCondition(result, scanFailOn)
+}
+
+func listScanners() error {
+	fmt.Println("Available vulnerability scanners:")
+	fmt.Println()
+
+	scanners := sbom.ListAvailableScanners()
+	for _, scanner := range scanners {
+		installed := "❌ Not installed"
+		if scanner.IsInstalled() {
+			version, _ := scanner.Version()
+			installed = fmt.Sprintf("✅ Installed (v%s)", version)
+		}
+
+		fmt.Printf("  %s - %s\n", scanner.Name(), installed)
+	}
+
+	fmt.Println()
+	fmt.Println("To install a scanner:")
+	fmt.Println("  goenv tools install grype")
+	fmt.Println("  goenv tools install trivy")
+
+	return nil
+}
+
+func displayScanResults(result *sbom.ScanResult, format string) error {
+	switch format {
+	case "json":
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal results: %w", err)
+		}
+		fmt.Println(string(data))
+
+	case "table":
+		displayTableResults(result)
+
+	default:
+		return fmt.Errorf("unsupported output format: %s", format)
+	}
+
+	return nil
+}
+
+func displayTableResults(result *sbom.ScanResult) {
+	fmt.Printf("\n🔍 Scan Results (%s v%s)\n", result.Scanner, result.ScannerVersion)
+	fmt.Println(strings.Repeat("=", 80))
+
+	fmt.Printf("\n📊 Summary:\n")
+	fmt.Printf("   Total: %d vulnerabilities\n", result.Summary.Total)
+	fmt.Printf("   Critical: %d | High: %d | Medium: %d | Low: %d\n",
+		result.Summary.Critical, result.Summary.High,
+		result.Summary.Medium, result.Summary.Low)
+	fmt.Printf("   With Fix: %d | Without Fix: %d\n",
+		result.Summary.WithFix, result.Summary.WithoutFix)
+
+	if len(result.Vulnerabilities) == 0 {
+		fmt.Printf("\n✅ No vulnerabilities found!\n")
+		return
+	}
+
+	fmt.Printf("\n🚨 Vulnerabilities:\n")
+	fmt.Println()
+
+	for i, vuln := range result.Vulnerabilities {
+		// Severity indicator
+		indicator := getSeverityIndicator(vuln.Severity)
+
+		fmt.Printf("%d. %s %s [%s]\n", i+1, indicator, vuln.ID, vuln.Severity)
+		fmt.Printf("   Package: %s@%s\n", vuln.PackageName, vuln.PackageVersion)
+
+		if vuln.FixAvailable {
+			fmt.Printf("   ✅ Fix: Upgrade to %s\n", vuln.FixedInVersion)
+		} else {
+			fmt.Printf("   ⚠️  No fix available\n")
+		}
+
+		if vuln.CVSS > 0 {
+			fmt.Printf("   CVSS: %.1f\n", vuln.CVSS)
+		}
+
+		if vuln.Description != "" {
+			// Truncate long descriptions
+			desc := vuln.Description
+			if len(desc) > 100 {
+				desc = desc[:97] + "..."
+			}
+			fmt.Printf("   %s\n", desc)
+		}
+
+		if len(vuln.URLs) > 0 {
+			fmt.Printf("   🔗 %s\n", vuln.URLs[0])
+		}
+
+		fmt.Println()
+	}
+}
+
+func getSeverityIndicator(severity string) string {
+	switch severity {
+	case "Critical":
+		return "🔴"
+	case "High":
+		return "🟠"
+	case "Medium":
+		return "🟡"
+	case "Low":
+		return "🔵"
+	default:
+		return "⚪"
+	}
+}
+
+func checkFailOnCondition(result *sbom.ScanResult, failOn string) error {
+	if failOn == "" {
+		return nil
+	}
+
+	switch failOn {
+	case "any":
+		if result.Summary.Total > 0 {
+			return fmt.Errorf("found %d vulnerabilities (--fail-on=any)", result.Summary.Total)
+		}
+	case "critical":
+		if result.Summary.Critical > 0 {
+			return fmt.Errorf("found %d critical vulnerabilities", result.Summary.Critical)
+		}
+	case "high":
+		if result.Summary.Critical > 0 || result.Summary.High > 0 {
+			total := result.Summary.Critical + result.Summary.High
+			return fmt.Errorf("found %d high/critical vulnerabilities", total)
+		}
+	}
+
+	return nil
 }

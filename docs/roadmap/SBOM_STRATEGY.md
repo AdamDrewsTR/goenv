@@ -605,19 +605,79 @@ rules:
 
 **Features:**
 
-#### Phase 4A: Open Source Scanner Integration
+#### Phase 4A: Open Source Scanner Integration ✅ COMPLETE
+**Status:** ✅ **COMPLETE** - Core implementation finished, ready for adoption  
+**Timeline:** Q4 2026 (3 months)
+
+Implemented features:
+- ✅ **Grype integration** - Full scanner backend with SBOM scanning
+- ✅ **Trivy integration** - Complete implementation with Kubernetes focus
+- ✅ **Scanner interface** - Extensible architecture for future scanners
+- ✅ **goenv sbom scan** command - CLI with multiple output formats
+- ✅ **Local scanning workflows** - No licensing costs or external APIs
+- ✅ **CI/CD examples** - GitHub Actions, GitLab CI, Jenkins pipelines
+- ✅ **Comprehensive documentation** - User guide with troubleshooting
+
+Success criteria:
+- ✅ Grype scanner implementation complete
+- ✅ Trivy scanner implementation complete
+- ✅ Scanner interface supports extensibility
+- ✅ `goenv sbom scan` command functional
+- ✅ Documentation and examples available
+- 🎯 15%+ users adopt Grype scanning (pending adoption)
+- 🎯 15%+ users adopt Trivy scanning (pending adoption)
+- 🎯 Integration with CI/CD platforms (examples provided)
+
+Features:
 - **Grype** (Anchore) - Fast, offline vulnerability scanning
 - **Trivy** (Aqua Security) - Kubernetes-native, container scanning
 - Local scanning workflows
 - No licensing costs
 
-#### Phase 4B: Commercial Scanner Integration
-- **Snyk** - Developer-focused, fix guidance, IDE/CLI/CI integration
-- **Veracode** - Enterprise compliance, governance, regulated industries
-- API-based SBOM upload
-- Enhanced vulnerability context
+#### Phase 4B: Commercial Scanner Integration ✅ COMPLETE
 
-#### Phase 5: Automation & Compliance
+**Status:** Implemented in v3.4
+
+**Scanners Integrated:**
+- **Snyk** - Developer-focused, fix guidance, IDE/CLI/CI integration
+  - API-based SBOM testing
+  - CLI fallback support
+  - Prioritized vulnerability remediation
+- **Veracode** - Enterprise compliance, governance, regulated industries
+  - SCA (Software Composition Analysis) integration
+  - Workspace-based scanning
+  - HMAC authentication
+
+**Implementation:**
+- ✅ Snyk scanner backend (`internal/sbom/snyk.go`)
+- ✅ Veracode scanner backend (`internal/sbom/veracode.go`)
+- ✅ API authentication (SNYK_TOKEN, VERACODE_API_KEY_*)
+- ✅ CLI command support (`goenv sbom scan --scanner=snyk|veracode`)
+- ✅ SBOM upload and result polling
+- ✅ Vulnerability result parsing and normalization
+
+**Usage:**
+```bash
+# Snyk scanning (requires SNYK_TOKEN)
+export SNYK_TOKEN="your-api-token"
+export SNYK_ORG_ID="your-org-id"  # optional
+goenv sbom scan sbom.json --scanner=snyk
+
+# Veracode scanning (requires API credentials)
+export VERACODE_API_KEY_ID="your-key-id"
+export VERACODE_API_KEY_SECRET="your-secret"
+goenv sbom scan sbom.json --scanner=veracode
+```
+
+**Success Criteria:**
+- [x] Authentication working for both scanners
+- [x] SBOM upload and scanning functional
+- [x] Results returned in standard format
+- [ ] Enterprise adoption metrics (pending real-world usage)
+
+---
+
+#### Phase 5: Automation & Compliance (PLANNED)
 - SBOM diffing and drift detection
 - Hooks for automatic generation (pre-commit, CI/CD)
 - Compliance reporting (SOC 2, ISO 27001, SLSA, SSDF)
@@ -716,10 +776,15 @@ As more organizations adopt:
 
 ### Phase 4-6 (Integration Features)
 
-#### Phase 4A (Open Source Scanners)
-- **Grype integration:** 15%+ users scan with Grype
-- **Trivy integration:** 15%+ users scan with Trivy
-- **Implementation:** Upload endpoints, result parsing, CI examples
+#### Phase 4A (Open Source Scanners) ✅ COMPLETE
+- ✅ **Core implementation:** Scanner interface and backends complete
+- ✅ **Grype integration:** Full implementation with result parsing
+- ✅ **Trivy integration:** Complete with Kubernetes support
+- ✅ **CLI command:** `goenv sbom scan` with multiple formats
+- ✅ **Documentation:** Comprehensive user guide with examples
+- 🎯 **Grype adoption:** 15%+ users scan with Grype (pending adoption)
+- 🎯 **Trivy adoption:** 15%+ users scan with Trivy (pending adoption)
+- 🎯 **CI/CD integration:** Examples provided for GitHub, GitLab, Jenkins
 
 #### Phase 4B (Commercial Scanners)
 - **Snyk integration:** 10%+ users with Snyk licenses
