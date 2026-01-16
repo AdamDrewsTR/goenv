@@ -719,9 +719,20 @@ goenv sbom scan sbom.json --scanner=veracode
   - Exit code management for pipeline control
   - Severity-based thresholds (critical, high, medium, low)
 
+- ✅ Policy enforcement engine (goenv sbom policy)
+  - YAML-based policy configuration for automated governance
+  - Supply chain security rules (local dependencies, vendoring, retracted versions)
+  - License compliance validation (allowed/denied/required licenses)
+  - Vulnerability threshold enforcement (max critical/high/medium)
+  - Dependency restrictions (allowed/blocked patterns with wildcards)
+  - Metadata requirements (supplier, author, formats)
+  - Multiple commands: validate, check (strict mode), generate (template), report
+  - JSON output for CI/CD integration
+  - Policy auto-detection from common file locations
+  - Detailed violation reports with remediation guidance
+
 **Planned:**
 - Compliance reporting (SOC 2, ISO 27001, SLSA, SSDF)
-- Policy enforcement engine with YAML configuration
 
 #### Phase 6: Analytics & Operations
 - Batch operations for multiple projects
