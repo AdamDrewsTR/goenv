@@ -677,9 +677,30 @@ goenv sbom scan sbom.json --scanner=veracode
 
 ---
 
-#### Phase 5: Automation & Compliance (PLANNED)
-- SBOM diffing and drift detection
-- Hooks for automatic generation (pre-commit, CI/CD)
+#### Phase 5: Automation & Compliance (IN PROGRESS - v3.5)
+
+**Status:** ⚙️ IN PROGRESS
+
+**Completed:**
+- ✅ SBOM diffing and comparison (goenv sbom diff)
+  - Compare two SBOMs to track dependency changes
+  - Multiple output formats (table, JSON, GitHub Actions, Markdown)
+  - Detect additions, removals, version changes, license changes
+  - CI/CD integration with --fail-on conditions
+  - Supports filtering and custom output destinations
+
+- ✅ Drift detection (goenv sbom drift)
+  - Save baseline SBOMs with versioning and descriptions
+  - Detect drift against established baselines
+  - Configurable drift policies (allow upgrades, downgrades, additions, removals)
+  - Strict mode for zero-tolerance drift detection
+  - Violation tracking with severity levels (low, medium, high)
+  - Multiple output formats (table, JSON)
+  - CI/CD integration with --fail-on-drift flag
+  - Baseline management (save, list, delete)
+
+**Planned:**
+- Git hooks for automatic generation (pre-commit, CI/CD)
 - Compliance reporting (SOC 2, ISO 27001, SLSA, SSDF)
 - Policy enforcement in pipelines
 
@@ -786,7 +807,7 @@ As more organizations adopt:
 - 🎯 **Trivy adoption:** 15%+ users scan with Trivy (pending adoption)
 - 🎯 **CI/CD integration:** Examples provided for GitHub, GitLab, Jenkins
 
-#### Phase 4B (Commercial Scanners)
+#### Phase 4B (Commercial Scanners) ✅ COMPLETE
 - **Snyk integration:** 10%+ users with Snyk licenses
 - **Veracode integration:** 5+ enterprise customers
 - **API validation:** Successful SBOM uploads to both platforms

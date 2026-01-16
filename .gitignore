@@ -27,3 +27,5 @@ scripts/swap/swap
 cmd/aliases/.go-version
 
 sbom*.json
+
+.goenv/*
