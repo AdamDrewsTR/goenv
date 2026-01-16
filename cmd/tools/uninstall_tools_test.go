@@ -519,6 +519,7 @@ func TestRunUninstall_NoToolsFound(t *testing.T) {
 	cmdtest.CreateMockGoVersionWithTools(t, tmpDir, version)
 
 	t.Setenv(utils.GoenvEnvVarVersion.String(), version)
+	t.Setenv(utils.GoenvEnvVarRoot.String(), tmpDir)
 
 	uninstallForce = true
 	err := runUninstall(cmd, []string{"nonexistent"})
