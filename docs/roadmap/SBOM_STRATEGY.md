@@ -731,8 +731,22 @@ goenv sbom scan sbom.json --scanner=veracode
   - Policy auto-detection from common file locations
   - Detailed violation reports with remediation guidance
 
+**Phase 5F: Compliance Reporting** ✅ COMPLETED
+- Multi-framework compliance reporting
+  - SOC 2: Software inventory, third-party management, change tracking
+  - ISO 27001: Configuration management, vulnerability management, secure development
+  - SLSA: Build scripted, provenance, supply chain transparency
+  - SSDF v1.1: SBOM generation, dependency management, build environment, vulnerability response
+  - CISA: SBOM availability, component information, supply chain security
+- Multiple output formats (text, JSON, HTML)
+- Automated compliance checks with evidence collection
+- Detailed recommendations for non-compliant items
+- CLI commands: `goenv sbom compliance report`, `goenv sbom compliance frameworks`
+- Exit codes for CI/CD integration (0=compliant, 1=non-compliant)
+- 14 test functions with 100% pass rate
+- Files: internal/sbom/compliance.go (~638 lines), cmd/compliance/sbom_compliance.go (~252 lines), internal/sbom/compliance_test.go (~654 lines)
+
 **Planned:**
-- Compliance reporting (SOC 2, ISO 27001, SLSA, SSDF)
 
 #### Phase 6: Analytics & Operations
 - Batch operations for multiple projects
@@ -842,10 +856,15 @@ As more organizations adopt:
 - ✅ **Veracode integration:** 5+ enterprise customers
 - **API validation:** Successful SBOM uploads to both platforms
 
-#### Phase 5 (Automation & Compliance)
-- **Compliance reporting:** 5+ frameworks supported (SOC 2, ISO 27001, SLSA, SSDF)
-- **CI/CD hooks:** 3+ platforms with automation examples
-- ✅ **SBOM diffing:** Drift detection across releases
+#### Phase 5 (Automation & Compliance) ✅ COMPLETE
+- ✅ **SBOM diffing:** Component change tracking and drift detection
+- ✅ **Drift detection:** Baseline management and policy violations
+- ✅ **Git hooks:** Automated SBOM generation on commits
+- ✅ **CI/CD integration:** Platform detection, validation, SARIF export
+- ✅ **Policy enforcement:** YAML-based governance with 4 rule types
+- ✅ **Compliance reporting:** 5+ frameworks supported (SOC 2, ISO 27001, SLSA, SSDF v1.1, CISA)
+- ✅ **Multiple formats:** Text, JSON, HTML output for all reports
+- ✅ **Test coverage:** 45+ test functions across all Phase 5 features
 
 #### Phase 6 (Analytics)
 - **Ecosystem growth:** 100+ organizations share policies/examples
